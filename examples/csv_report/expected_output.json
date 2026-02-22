@@ -1,0 +1,16 @@
+{
+  "total_rows": 5,
+  "departments": {
+    "Engineering": {
+      "headcount": 3,
+      "total_hours": 127,
+      "total_cost": 9540.0
+    },
+    "Marketing": {
+      "headcount": 2,
+      "total_hours": 73,
+      "total_cost": 4205.0
+    }
+  },
+  "total_cost": 13745.0
+}

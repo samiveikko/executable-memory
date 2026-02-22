@@ -1,0 +1,16 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "properties": {
+    "total_rows": {
+      "type": "integer"
+    },
+    "departments": {
+      "type": "object"
+    },
+    "total_cost": {
+      "type": "number"
+    }
+  },
+  "required": ["total_rows", "departments", "total_cost"]
+}

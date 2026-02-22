@@ -1,0 +1,83 @@
+version: "1"
+name: csv_report
+description: Fetch a CSV file, parse and clean it, optionally ask for approval, then summarize.
+
+tools:
+  - name: fetch_csv
+    description: Fetch CSV content from a URL (or fixture://)
+    args_schema:
+      type: object
+      properties:
+        url:
+          type: string
+      required: [url]
+
+input_schema:
+  type: object
+  properties:
+    url:
+      type: string
+  required: [url]
+
+output_schema:
+  type: object
+  properties:
+    total_rows:
+      type: integer
+    departments:
+      type: object
+    total_cost:
+      type: number
+  required: [total_rows, departments, total_cost]
+
+steps:
+  - id: fetch
+    type: tool.call
+    description: Fetch the CSV data
+    tool: fetch_csv
+    args:
+      url: "{{ url }}"
+    save_as: raw_csv
+
+  - id: parse
+    type: udf.call
+    description: Parse and clean the CSV data
+    function: parse_and_clean
+    args:
+      raw_csv: "{{ raw_csv }}"
+    save_as: rows
+
+  - id: check_rows
+    type: assert
+    description: Ensure we got some data
+    check: "count(rows) > 0"
+    message: "CSV file is empty — no rows parsed"
+
+  - id: check_delimiter
+    type: prompt.user
+    description: Ask user to confirm if delimiter is ambiguous
+    when: "is_ambiguous_delimiter(raw_csv)"
+    prompt:
+      message: "The CSV delimiter seems ambiguous. Please confirm how to proceed."
+      fields:
+        - name: delimiter
+          label: "Which delimiter should be used?"
+          type: select
+          options: [",", "\t", ";", "|"]
+        - name: proceed
+          label: "Proceed with parsing?"
+          type: confirm
+          default: true
+    save_as: delimiter_choice
+
+  - id: summarize
+    type: udf.call
+    description: Summarize the parsed rows
+    function: summarize_rows
+    args:
+      rows: "{{ rows }}"
+    save_as: summary
+
+  - id: result
+    type: return
+    value: "{{ summary }}"

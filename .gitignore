@@ -1,0 +1,11 @@
+*.pyc
+__pycache__/
+*.egg-info/
+dist/
+build/
+.eggs/
+node_modules/
+.next/
+.pytest_cache/
+.venv/
+

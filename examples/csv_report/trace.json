@@ -1,0 +1,67 @@
+{
+  "version": "1",
+  "app": {
+    "name": "csv-agent",
+    "version": "1.0"
+  },
+  "mission": {
+    "goal": "Fetch a CSV file, parse it, and produce a department summary report",
+    "input_summary": {"url": "fixture://demo.csv"}
+  },
+  "events": [
+    {
+      "type": "tool_call",
+      "seq": 0,
+      "tool": "fetch_csv",
+      "args": {"url": "fixture://demo.csv"},
+      "result": "name,department,hours,rate\nAlice,Engineering,40,75.00\nBob,Marketing,35,55.00\nCharlie,Engineering,45,80.00\nDiana,Marketing,38,60.00\nEve,Engineering,42,70.00\n"
+    },
+    {
+      "type": "udf_call",
+      "seq": 1,
+      "function": "parse_and_clean",
+      "args": {"raw_csv": "name,department,hours,rate\nAlice,Engineering,40,75.00\nBob,Marketing,35,55.00\nCharlie,Engineering,45,80.00\nDiana,Marketing,38,60.00\nEve,Engineering,42,70.00\n"},
+      "result": [
+        {"name": "Alice", "department": "Engineering", "hours": 40, "rate": 75.0},
+        {"name": "Bob", "department": "Marketing", "hours": 35, "rate": 55.0},
+        {"name": "Charlie", "department": "Engineering", "hours": 45, "rate": 80.0},
+        {"name": "Diana", "department": "Marketing", "hours": 38, "rate": 60.0},
+        {"name": "Eve", "department": "Engineering", "hours": 42, "rate": 70.0}
+      ]
+    },
+    {
+      "type": "approval",
+      "seq": 2,
+      "prompt": "The CSV has 5 rows across 2 departments. Proceed with summarization?",
+      "answer": true
+    },
+    {
+      "type": "udf_call",
+      "seq": 3,
+      "function": "summarize_rows",
+      "args": {"rows": [
+        {"name": "Alice", "department": "Engineering", "hours": 40, "rate": 75.0},
+        {"name": "Bob", "department": "Marketing", "hours": 35, "rate": 55.0},
+        {"name": "Charlie", "department": "Engineering", "hours": 45, "rate": 80.0},
+        {"name": "Diana", "department": "Marketing", "hours": 38, "rate": 60.0},
+        {"name": "Eve", "department": "Engineering", "hours": 42, "rate": 70.0}
+      ]},
+      "result": {
+        "total_rows": 5,
+        "departments": {
+          "Engineering": {"headcount": 3, "total_hours": 127, "total_cost": 9540.0},
+          "Marketing": {"headcount": 2, "total_hours": 73, "total_cost": 5205.0}
+        },
+        "total_cost": 14745.0
+      }
+    }
+  ],
+  "final_output": {
+    "total_rows": 5,
+    "departments": {
+      "Engineering": {"headcount": 3, "total_hours": 127, "total_cost": 9540.0},
+      "Marketing": {"headcount": 2, "total_hours": 73, "total_cost": 5205.0}
+    },
+    "total_cost": 14745.0
+  }
+}
