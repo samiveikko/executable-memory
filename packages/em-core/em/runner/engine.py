@@ -21,8 +21,15 @@ def run_routine(
     input_data: dict[str, Any] | None = None,
     tool_registry: ToolRegistry | None = None,
     state_store: StateStore | None = None,
+    auto_fix_fn: Any | None = None,
 ) -> RunResult:
-    """Run a routine from start to finish."""
+    """Run a routine from start to finish.
+
+    Args:
+        auto_fix_fn: Optional callback ``(step, exc, context, routine) -> fix_dict | None``.
+            When a step fails and this is provided, the engine calls it before
+            giving up.  See ``em.llm._recovery.make_auto_fix_fn`` for the factory.
+    """
     routine_dir = Path(routine_dir)
     pkg = RoutinePackage(routine_dir)
     run_id = generate_run_id()
@@ -39,6 +46,7 @@ def run_routine(
         tool_registry=tool_registry or ToolRegistry(),
         state_store=state_store,
         routine_dir=routine_dir,
+        auto_fix_fn=auto_fix_fn,
     )
 
 
@@ -122,6 +130,7 @@ def _execute_steps(
     tool_registry: ToolRegistry,
     state_store: StateStore,
     routine_dir: Path,
+    auto_fix_fn: Any | None = None,
 ) -> RunResult:
     """Execute steps starting from start_index."""
     steps = pkg.routine.steps
@@ -149,47 +158,54 @@ def _execute_steps(
                 )
 
         try:
-            if step.type == StepType.tool_call:
-                result = _exec_tool_call(step, context, pkg, tool_registry)
-                if step.save_as:
-                    context[step.save_as] = result
-
-            elif step.type == StepType.udf_call:
-                result = _exec_udf_call(step, context, pkg)
-                if step.save_as:
-                    context[step.save_as] = result
-
-            elif step.type == StepType.assert_:
-                _exec_assert(step, context, pkg)
-
-            elif step.type == StepType.prompt_user:
-                # Pause execution and save state
-                state = RunState(
-                    run_id=run_id,
-                    routine_dir=str(routine_dir),
-                    step_index=i,
-                    context=dict(context),
-                    pending_step_id=step.id,
-                )
-                state_store.save(state)
-
-                return RunResult(
-                    run_id=run_id,
-                    status=RunStatus.needs_input,
-                    pending_prompt=step.id,
-                    context=dict(context),
-                )
-
-            elif step.type == StepType.return_:
-                output = render_value(step.value, context, pkg.udf_module)
-                return RunResult(
-                    run_id=run_id,
-                    status=RunStatus.ok,
-                    output=output,
-                    context=dict(context),
-                )
+            _run_step(step, context, pkg, tool_registry, state_store, routine_dir, run_id, i)
+            # prompt.user and return steps produce RunResult directly
+        except _StepResult as sr:
+            return sr.result
 
         except Exception as exc:
+            # Try auto-fix if callback is provided (max 1 retry per step)
+            fix = None
+            if auto_fix_fn is not None:
+                try:
+                    fix = auto_fix_fn(step, exc, context, pkg.routine)
+                except Exception:
+                    fix = None
+
+            if fix is not None and isinstance(fix, dict):
+                strategy = fix.get("strategy")
+
+                if strategy == "modify_args":
+                    new_args = fix.get("new_args")
+                    if isinstance(new_args, dict):
+                        patched_step = step.model_copy(update={"args": new_args})
+                        try:
+                            _run_step(
+                                patched_step, context, pkg, tool_registry,
+                                state_store, routine_dir, run_id, i,
+                            )
+                        except _StepResult as sr:
+                            return sr.result
+                        except Exception as retry_exc:
+                            return RunResult(
+                                run_id=run_id,
+                                status=RunStatus.failed,
+                                failure=FailureReport(
+                                    step_id=step.id,
+                                    error_type=type(retry_exc).__name__,
+                                    message=str(retry_exc),
+                                    context=dict(context),
+                                ),
+                            )
+                        continue  # step succeeded after retry
+
+                elif strategy == "skip":
+                    default_value = fix.get("default_value")
+                    if step.save_as:
+                        context[step.save_as] = default_value
+                    continue
+
+            # No fix or strategy == "fail" → normal failure
             return RunResult(
                 run_id=run_id,
                 status=RunStatus.failed,
@@ -207,6 +223,67 @@ def _execute_steps(
         status=RunStatus.ok,
         output=context,
     )
+
+
+class _StepResult(Exception):
+    """Internal: raised by _run_step when a step produces a RunResult (prompt/return)."""
+
+    def __init__(self, result: RunResult) -> None:
+        self.result = result
+
+
+def _run_step(
+    step,
+    context: dict[str, Any],
+    pkg: RoutinePackage,
+    tool_registry: ToolRegistry,
+    state_store: StateStore,
+    routine_dir: Path,
+    run_id: str,
+    step_index: int,
+) -> None:
+    """Execute a single step, updating *context* in place.
+
+    Raises _StepResult for prompt.user and return steps (they produce a RunResult).
+    Raises other exceptions on failure.
+    """
+    if step.type == StepType.tool_call:
+        result = _exec_tool_call(step, context, pkg, tool_registry)
+        if step.save_as:
+            context[step.save_as] = result
+
+    elif step.type == StepType.udf_call:
+        result = _exec_udf_call(step, context, pkg)
+        if step.save_as:
+            context[step.save_as] = result
+
+    elif step.type == StepType.assert_:
+        _exec_assert(step, context, pkg)
+
+    elif step.type == StepType.prompt_user:
+        state = RunState(
+            run_id=run_id,
+            routine_dir=str(routine_dir),
+            step_index=step_index,
+            context=dict(context),
+            pending_step_id=step.id,
+        )
+        state_store.save(state)
+        raise _StepResult(RunResult(
+            run_id=run_id,
+            status=RunStatus.needs_input,
+            pending_prompt=step.id,
+            context=dict(context),
+        ))
+
+    elif step.type == StepType.return_:
+        output = render_value(step.value, context, pkg.udf_module)
+        raise _StepResult(RunResult(
+            run_id=run_id,
+            status=RunStatus.ok,
+            output=output,
+            context=dict(context),
+        ))
 
 
 def _build_eval_context(context: dict[str, Any], pkg: RoutinePackage) -> dict[str, Any]:

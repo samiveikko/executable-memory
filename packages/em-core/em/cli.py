@@ -15,8 +15,21 @@ app = typer.Typer(name="em", help="Executable Memory CLI")
 def compile(
     trace_path: Path = typer.Argument(..., help="Path to trace JSON file"),
     output_dir: Path = typer.Option("./routine_out", "-o", "--output", help="Output directory"),
+    llm: bool = typer.Option(False, "--llm", help="Use LLM to compile (smarter, requires API key)"),
 ) -> None:
     """Compile an agent trace into a routine package."""
+    if llm:
+        try:
+            from em.compiler.llm_compile import llm_compile_trace_file
+            from em.llm import get_llm_client
+
+            client = get_llm_client()
+            llm_compile_trace_file(trace_path, output_dir, client)
+            typer.echo(f"Routine package written to {output_dir} (LLM-compiled)")
+            return
+        except Exception as exc:
+            typer.echo(f"LLM compilation failed ({exc}), falling back to deterministic compiler", err=True)
+
     from em.compiler.compile_trace import compile_trace_file
 
     try:
@@ -33,6 +46,7 @@ def run(
     input_file: Path = typer.Option(None, "--input", "-i", help="Input JSON file"),
     output_file: Path = typer.Option(None, "--out", "-o", help="Output JSON file"),
     json_output: bool = typer.Option(False, "--json", help="Output raw JSON"),
+    auto_fix: bool = typer.Option(False, "--auto-fix", help="Use LLM to auto-fix failed steps"),
 ) -> None:
     """Run a routine, handling prompt.user steps interactively."""
     from em.models.prompts import PromptAnswers
@@ -48,11 +62,23 @@ def run(
     state_store = FileStateStore(Path("/tmp/em_state"))
     tool_registry = _build_tool_registry(routine_dir)
 
+    auto_fix_fn = None
+    if auto_fix:
+        try:
+            from em.llm import get_llm_client
+            from em.llm._recovery import make_auto_fix_fn
+
+            client = get_llm_client()
+            auto_fix_fn = make_auto_fix_fn(client)
+        except Exception as exc:
+            typer.echo(f"Warning: could not initialize auto-fix ({exc})", err=True)
+
     result = run_routine(
         routine_dir=routine_dir,
         input_data=input_data,
         tool_registry=tool_registry,
         state_store=state_store,
+        auto_fix_fn=auto_fix_fn,
     )
 
     # Handle interactive prompts
