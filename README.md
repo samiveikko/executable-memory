@@ -181,7 +181,6 @@ packages/
       models/       # Pydantic models (Trace, Routine, Results)
       utils/        # YAML I/O, schemas, hashing
     tests/          # 88 tests (all mocked, no API keys needed)
-  em-web/           # Web demo playground
 examples/
   csv_report/       # Complete working example
 ```
@@ -189,7 +188,6 @@ examples/
 ## Links
 
 - [Documentation](docs/)
-- [Web Demo](packages/em-web/)
 - [Contributing](CONTRIBUTING.md)
 
 ## License
