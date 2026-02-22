@@ -188,7 +188,6 @@ examples/
 ## Links
 
 - [Documentation](docs/)
-- [Contributing](CONTRIBUTING.md)
 
 ## License
 
