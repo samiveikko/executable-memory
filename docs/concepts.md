@@ -10,6 +10,12 @@ A **routine** is a deterministic program compiled from a trace. It replays the s
 Agent Session → Trace (JSON) → Compile → Routine (YAML + UDFs) → Run deterministically
 ```
 
+## Compilation Modes
+
+**Deterministic (default):** Copies the trace 1:1 into a routine. UDFs are generated as stubs that need manual implementation. Fast and predictable, but doesn't handle messy traces.
+
+**LLM-powered (`--llm`):** An LLM analyzes the trace, extracts the happy path, removes errors/retries/dead-ends, and generates fully implemented UDFs. The LLM is only called once at compile time — the resulting routine is still deterministic.
+
 ## Determinism
 
 Routines are deterministic by design:
@@ -42,3 +48,17 @@ When a `prompt.user` step is reached:
 3. The caller collects answers from the user
 4. Calls `resume_run()` with the answers
 5. Execution continues from where it paused
+
+## Runtime Recovery (Auto-fix)
+
+When running with `--auto-fix`, the engine can recover from step failures using an LLM:
+
+1. A step fails with an exception
+2. The engine sends the error context to the LLM (step definition, error type, context keys)
+3. The LLM returns a recovery strategy:
+   - **modify_args** — retry with corrected arguments (max 1 retry per step)
+   - **skip** — skip the step and use a default value
+   - **fail** — no recovery possible
+4. Credential/auth errors always result in "fail" (cannot fix at runtime)
+
+Auto-fix is optional and requires an LLM API key. Without it, errors propagate normally.
