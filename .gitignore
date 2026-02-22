@@ -8,4 +8,5 @@ node_modules/
 .next/
 .pytest_cache/
 .venv/
+CLAUDE.md
 
